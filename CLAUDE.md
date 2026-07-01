@@ -8,7 +8,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 # Install dependencies
 pip install -r requirements.txt
 
-# Start API server (auto-reloads on code changes)
+# Start Postgres container + API server in one command (requires Docker)
+./scripts/dev.sh
+
+# Start API server only (if Postgres is already running)
 uvicorn app.main:app --reload
 
 # Run all crawlers
