@@ -13,7 +13,7 @@ from app.crawlers.base import BaseCrawler
 
 logger = logging.getLogger(__name__)
 
-OPEN_DATA_BASE = "https://plvr.land.moi.gov.tw/DownloadSeason"
+OPEN_DATA_BASE = "https://plvr.land.moi.gov.tw/DownloadHistory"
 
 CITY_CODES = {
     "A": "台北市",
@@ -49,33 +49,12 @@ class LvrLandCrawler(BaseCrawler):
         self.year = year
         self.season = season
 
-    def _build_url(self, city_code: str) -> str:
-        return (
-            f"{OPEN_DATA_BASE}?season={self.year}S{self.season}"
-            f"&type=ZIP&token=&fileName={city_code}_lvr_land_A.zip"
-        )
+    def _season_str(self) -> str:
+        return f"{self.year}S{self.season}"
 
-    async def _fetch_city(self, city_code: str, city_name: str) -> AsyncIterator[dict]:
-        url = self._build_url(city_code)
-        try:
-            resp = await self.get(url)
-        except Exception as e:
-            logger.warning(f"Failed to fetch {city_name}: {e}")
-            return
-
-        try:
-            with zipfile.ZipFile(io.BytesIO(resp.content)) as zf:
-                for name in zf.namelist():
-                    if not name.endswith(".csv"):
-                        continue
-                    with zf.open(name) as f:
-                        content = f.read().decode("utf-8-sig", errors="replace")
-                        reader = csv.DictReader(io.StringIO(content))
-                        rows = list(reader)
-                        for row in rows[1:]:
-                            yield self._parse_row(row, city_name)
-        except zipfile.BadZipFile:
-            logger.warning(f"Bad zip for {city_name}")
+    def _build_url(self) -> str:
+        # Whole-season archive containing one CSV per city (a_lvr_land_a.csv, ...).
+        return f"{OPEN_DATA_BASE}?type=season&fileName={self._season_str()}"
 
     def _parse_row(self, row: dict, city_name: str) -> dict:
         def _float(v: str) -> float | None:
@@ -143,7 +122,33 @@ class LvrLandCrawler(BaseCrawler):
         return "other"
 
     async def crawl(self) -> AsyncIterator[dict]:
-        for code, name in CITY_CODES.items():
-            logger.info(f"Crawling 實價登錄 {name}...")
-            async for record in self._fetch_city(code, name):
-                yield record
+        season = self._season_str()
+        logger.info(f"Downloading 實價登錄 season {season} (all cities)...")
+        try:
+            resp = await self.get(self._build_url(), timeout=180.0)
+        except Exception as e:
+            logger.warning(f"Failed to download season {season}: {e}")
+            return
+
+        try:
+            zf = zipfile.ZipFile(io.BytesIO(resp.content))
+        except zipfile.BadZipFile:
+            logger.warning(f"Bad zip for season {season}")
+            return
+
+        with zf:
+            names = set(zf.namelist())
+            for code, name in CITY_CODES.items():
+                # Sale transactions (買賣) live in <code>_lvr_land_a.csv (lowercase).
+                csv_name = f"{code.lower()}_lvr_land_a.csv"
+                if csv_name not in names:
+                    logger.warning(f"No data file for {name} ({csv_name})")
+                    continue
+                logger.info(f"Parsing 實價登錄 {name}...")
+                with zf.open(csv_name) as f:
+                    content = f.read().decode("utf-8-sig", errors="replace")
+                reader = csv.DictReader(io.StringIO(content))
+                rows = list(reader)
+                # rows[0] is the English-header row shipped by the source; skip it.
+                for row in rows[1:]:
+                    yield self._parse_row(row, name)

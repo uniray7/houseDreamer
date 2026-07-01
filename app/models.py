@@ -39,7 +39,7 @@ class Listing(Base):
     price: Mapped[float] = mapped_column(Float, nullable=True)
     unit_price: Mapped[float] = mapped_column(Float, nullable=True)
     area_ping: Mapped[float] = mapped_column(Float, nullable=True)
-    floor: Mapped[str] = mapped_column(String(20), nullable=True)
+    floor: Mapped[str] = mapped_column(Text, nullable=True)
     total_floors: Mapped[int] = mapped_column(Integer, nullable=True)
     rooms: Mapped[int] = mapped_column(Integer, nullable=True)
     age: Mapped[float] = mapped_column(Float, nullable=True)
