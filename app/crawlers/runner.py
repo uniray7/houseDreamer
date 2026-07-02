@@ -11,7 +11,7 @@ from app.crawlers.yungching import YungchingCrawler
 from app.crawlers.sinyi import SinyiCrawler
 from app.crawlers.chunghua import ChunghuaCrawler
 from app.database import AsyncSessionLocal
-from app.models import Listing
+from app.models import Listing, Transaction
 
 logger = logging.getLogger(__name__)
 
@@ -22,6 +22,8 @@ ALL_CRAWLERS: list[Type[BaseCrawler]] = [
     SinyiCrawler,
     ChunghuaCrawler,
 ]
+
+TRANSACTION_CRAWLERS = {"lvr_land"}
 
 
 async def run_crawler(crawler_class: Type[BaseCrawler], **kwargs) -> int:
@@ -40,12 +42,18 @@ async def run_crawler(crawler_class: Type[BaseCrawler], **kwargs) -> int:
 async def _upsert(session: AsyncSession, data: dict):
     source = data.get("source")
     source_id = data.get("source_id")
+
+    if source in TRANSACTION_CRAWLERS:
+        model = Transaction
+    else:
+        model = Listing
+
     existing = None
     if source_id:
         result = await session.execute(
-            select(Listing).where(
-                Listing.source == source,
-                Listing.source_id == source_id,
+            select(model).where(
+                model.source == source,
+                model.source_id == source_id,
             )
         )
         existing = result.scalar_one_or_none()
@@ -55,7 +63,7 @@ async def _upsert(session: AsyncSession, data: dict):
             if hasattr(existing, k) and v is not None:
                 setattr(existing, k, v)
     else:
-        session.add(Listing(**data))
+        session.add(model(**data))
     await session.commit()
 
 
