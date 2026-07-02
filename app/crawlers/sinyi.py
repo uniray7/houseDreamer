@@ -1,24 +1,25 @@
 """
 信義房屋 crawler - https://www.sinyi.com.tw
+Uses Playwright for JavaScript-rendered pages.
 """
 
 import logging
+import re
 from typing import AsyncIterator
 
-from bs4 import BeautifulSoup
-
-from app.crawlers.base import BaseCrawler
+from app.crawlers.base import BaseCrawler, playwright_page
 
 logger = logging.getLogger(__name__)
 
+# sinyi uses Title-Case city slugs
 CITIES = [
-    ("taipei", "台北市"),
-    ("new-taipei", "新北市"),
-    ("taoyuan", "桃園市"),
-    ("taichung", "台中市"),
-    ("tainan", "台南市"),
-    ("kaohsiung", "高雄市"),
-    ("hsinchu-city", "新竹市"),
+    ("Taipei-city", "台北市"),
+    ("New-Taipei-city", "新北市"),
+    ("Taoyuan-city", "桃園市"),
+    ("Taichung-city", "台中市"),
+    ("Tainan-city", "台南市"),
+    ("Kaohsiung-city", "高雄市"),
+    ("Hsinchu-city", "新竹市"),
 ]
 
 
@@ -29,36 +30,60 @@ class SinyiCrawler(BaseCrawler):
         super().__init__()
         self.max_pages = max_pages
 
+    def _parse_price(self, text: str) -> float | None:
+        text = text.replace(",", "")
+        m = re.search(r"([\d.]+)", text)
+        if not m:
+            return None
+        val = float(m.group(1))
+        if "億" in text:
+            val *= 10000
+        return val
+
+    def _parse_area(self, text: str) -> float | None:
+        m = re.search(r"([\d.]+)", text)
+        return float(m.group(1)) if m else None
+
+    def _extract_district(self, city_name: str, text: str) -> str:
+        m = re.search(rf"{city_name}(.{{2,4}}[區鄉鎮市])", text)
+        return m.group(1) if m else ""
+
     async def _fetch_page(self, city_slug: str, city_name: str, page: int) -> list[dict]:
-        url = f"https://www.sinyi.com.tw/buy/list/{city_slug}-city/0-price/desc/{page}/"
+        url = f"https://www.sinyi.com.tw/buy/list/{city_slug}/0-price/desc/{page}/"
         try:
-            resp = await self.get(url)
-            soup = BeautifulSoup(resp.text, "lxml")
+            async with playwright_page() as pw_page:
+                await pw_page.goto(url, wait_until="networkidle", timeout=30000)
+                content = await pw_page.content()
+
+            from bs4 import BeautifulSoup
+            soup = BeautifulSoup(content, "lxml")
             return self._parse_list(soup, city_name)
         except Exception as e:
             logger.warning(f"信義 {city_name} page {page} failed: {e}")
             return []
 
-    def _parse_list(self, soup: BeautifulSoup, city_name: str) -> list[dict]:
+    def _parse_list(self, soup, city_name: str) -> list[dict]:
         results = []
-        cards = soup.select("div.buy-list-item, li.buy-item, div[class*='house-item']")
+        # sinyi uses li elements inside a buy-list container
+        cards = soup.select("li.buy-list-item, div.buy-list-item, li[class*='item']")
         if not cards:
-            cards = soup.select("div[class*='item']")
+            # fallback: any card-like container with a price element
+            cards = soup.select("div[class*='house'], article[class*='house']")
         for card in cards:
             try:
                 record = self._parse_card(card, city_name)
                 if record:
                     results.append(record)
             except Exception as e:
-                logger.debug(f"Sinyi card parse error: {e}")
+                logger.debug(f"信義 card parse error: {e}")
         return results
 
     def _parse_card(self, card, city_name: str) -> dict | None:
-        title_el = card.select_one("h3, h2, .title, [class*='title']")
-        price_el = card.select_one(".price, [class*='price']")
-        area_el = card.select_one("[class*='area'], [class*='ping']")
+        title_el = card.select_one("h3, h2, .house-title, [class*='title']")
+        price_el = card.select_one(".price, .house-price, [class*='price']")
+        area_el = card.select_one("[class*='area'], [class*='ping'], [class*='size']")
         link_el = card.select_one("a[href]")
-        addr_el = card.select_one("[class*='addr'], [class*='address']")
+        addr_el = card.select_one("[class*='addr'], [class*='address'], [class*='location']")
 
         title = title_el.get_text(strip=True) if title_el else ""
         if not title:
@@ -91,28 +116,7 @@ class SinyiCrawler(BaseCrawler):
             "age": None,
             "url": url,
             "description": "",
-            "trade_date": None,
         }
-
-    def _parse_price(self, text: str) -> float | None:
-        import re
-        m = re.search(r"([\d.]+)", text.replace(",", ""))
-        if not m:
-            return None
-        val = float(m.group(1))
-        if "億" in text:
-            val *= 10000
-        return val
-
-    def _parse_area(self, text: str) -> float | None:
-        import re
-        m = re.search(r"([\d.]+)", text)
-        return float(m.group(1)) if m else None
-
-    def _extract_district(self, city_name: str, text: str) -> str:
-        import re
-        m = re.search(rf"{city_name}(.{{2,4}}[區鄉鎮市])", text)
-        return m.group(1) if m else ""
 
     async def crawl(self) -> AsyncIterator[dict]:
         for city_slug, city_name in CITIES:

@@ -1,6 +1,7 @@
 import asyncio
 import logging
 from abc import ABC, abstractmethod
+from contextlib import asynccontextmanager
 from typing import AsyncIterator
 
 import httpx
@@ -17,6 +18,31 @@ HEADERS = {
     ),
     "Accept-Language": "zh-TW,zh;q=0.9,en;q=0.8",
 }
+
+
+@asynccontextmanager
+async def playwright_page():
+    """Async context manager that yields a Playwright page with a real Chromium browser."""
+    from playwright.async_api import async_playwright
+    import os
+
+    chromium_path = os.environ.get("PLAYWRIGHT_CHROMIUM_PATH", "/opt/pw-browsers/chromium")
+
+    async with async_playwright() as p:
+        browser = await p.chromium.launch(
+            executable_path=chromium_path if os.path.exists(chromium_path) else None,
+            args=["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"],
+        )
+        context = await browser.new_context(
+            user_agent=HEADERS["User-Agent"],
+            locale="zh-TW",
+            extra_http_headers={"Accept-Language": "zh-TW,zh;q=0.9,en;q=0.8"},
+        )
+        page = await context.new_page()
+        try:
+            yield page
+        finally:
+            await browser.close()
 
 
 class BaseCrawler(ABC):

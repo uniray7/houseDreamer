@@ -1,8 +1,14 @@
 [phases.setup]
-nixPkgs = ["python311", "gcc"]
+nixPkgs = ["python311", "gcc", "chromium", "nss", "nssTools", "xorg.libX11", "xorg.libXcomposite", "xorg.libXdamage", "xorg.libXext", "xorg.libXfixes", "xorg.libXrandr", "xorg.libxcb", "libdrm", "mesa", "expat", "glib", "dbus", "atk", "at-spi2-atk", "cups", "pango", "cairo", "alsa-lib"]
 
 [phases.install]
-cmds = ["pip install -r requirements.txt"]
+cmds = [
+    "pip install -r requirements.txt",
+    "PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 playwright install chromium || true"
+]
+
+[variables]
+PLAYWRIGHT_CHROMIUM_PATH = "/run/current-system/sw/bin/chromium"
 
 [start]
 cmd = "uvicorn app.main:app --host 0.0.0.0 --port $PORT"
