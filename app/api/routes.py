@@ -1,6 +1,6 @@
 from typing import Optional
 from fastapi import APIRouter, Depends, Query, HTTPException, BackgroundTasks
-from sqlalchemy import select, func
+from sqlalchemy import select, func, union_all, literal
 from sqlalchemy.ext.asyncio import AsyncSession
 from pydantic import BaseModel
 from datetime import datetime
